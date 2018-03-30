@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <avr/power.h>
 #include <avr/sleep.h>
+#include <avr/wdt.h>
 #include <limits.h>
 
 
@@ -50,12 +51,6 @@
 #define RST_PORT PORTD  // Display reset port
 #define RST_BIT PORTD7  // Display reset physical bit number
 
-#define SPI_MOSI_PORT PORTB
-#define SPI_MOSI_BIT PORTB2
-
-#define SPI_SCK_PORT PORTB
-#define SPI_SCK_BIT PORTB1
-
 #define RED_LED 10   /**< The pin number for the red color in the RGB LED. */
 #define GREEN_LED 11 /**< The pin number for the greem color in the RGB LED. */
 #define BLUE_LED 9   /**< The pin number for the blue color in the RGB LED. */
@@ -80,26 +75,38 @@
 
 #define PIN_LEFT_BUTTON A2
 #define LEFT_BUTTON_PORT PORTF
+#define LEFT_BUTTON_PORTIN PINF
+#define LEFT_BUTTON_DDR DDRF
 #define LEFT_BUTTON_BIT PORTF5
 
 #define PIN_RIGHT_BUTTON A1
 #define RIGHT_BUTTON_PORT PORTF
+#define RIGHT_BUTTON_PORTIN PINF
+#define RIGHT_BUTTON_DDR DDRF
 #define RIGHT_BUTTON_BIT PORTF6
 
 #define PIN_UP_BUTTON A0
 #define UP_BUTTON_PORT PORTF
+#define UP_BUTTON_PORTIN PINF
+#define UP_BUTTON_DDR DDRF
 #define UP_BUTTON_BIT PORTF7
 
 #define PIN_DOWN_BUTTON A3
 #define DOWN_BUTTON_PORT PORTF
+#define DOWN_BUTTON_PORTIN PINF
+#define DOWN_BUTTON_DDR DDRF
 #define DOWN_BUTTON_BIT PORTF4
 
 #define PIN_A_BUTTON 7
 #define A_BUTTON_PORT PORTE
+#define A_BUTTON_PORTIN PINE
+#define A_BUTTON_DDR DDRE
 #define A_BUTTON_BIT PORTE6
 
 #define PIN_B_BUTTON 8
 #define B_BUTTON_PORT PORTB
+#define B_BUTTON_PORTIN PINB
+#define B_BUTTON_DDR DDRB
 #define B_BUTTON_BIT PORTB4
 
 #define PIN_SPEAKER_1 5  /**< The pin number of the first lead of the speaker */
@@ -112,12 +119,6 @@
 #define SPEAKER_2_PORT PORTC
 #define SPEAKER_2_DDR DDRC
 #define SPEAKER_2_BIT PORTC7
-
-#define RAND_SEED_IN A4 // Open analog input used for noise by initRandomSeed()
-#define RAND_SEED_IN_PORTF
-#define RAND_SEED_IN_BIT PORTF1
-// Value for ADMUX to read the random seed pin: 2.56V reference, ADC1
-#define RAND_SEED_IN_ADMUX (_BV(REFS0) | _BV(REFS1) | _BV(MUX0))
 // -----------------------
 
 // ----- DevKit pins -----
@@ -161,26 +162,38 @@
 // pin values for buttons, probably shouldn't use these
 #define PIN_LEFT_BUTTON 9
 #define LEFT_BUTTON_PORT PORTB
+#define LEFT_BUTTON_PORTIN PINB
+#define LEFT_BUTTON_DDR DDRB
 #define LEFT_BUTTON_BIT PORTB5
 
 #define PIN_RIGHT_BUTTON 5
 #define RIGHT_BUTTON_PORT PORTC
+#define RIGHT_BUTTON_PORTIN PINC
+#define RIGHT_BUTTON_DDR DDRC
 #define RIGHT_BUTTON_BIT PORTC6
 
 #define PIN_UP_BUTTON 8
 #define UP_BUTTON_PORT PORTB
+#define UP_BUTTON_PORTIN PINB
+#define UP_BUTTON_DDR DDRB
 #define UP_BUTTON_BIT PORTB4
 
 #define PIN_DOWN_BUTTON 10
 #define DOWN_BUTTON_PORT PORTB
+#define DOWN_BUTTON_PORTIN PINB
+#define DOWN_BUTTON_DDR DDRB
 #define DOWN_BUTTON_BIT PORTB6
 
 #define PIN_A_BUTTON A0
 #define A_BUTTON_PORT PORTF
+#define A_BUTTON_PORTIN PINF
+#define A_BUTTON_DDR DDRF
 #define A_BUTTON_BIT PORTF7
 
 #define PIN_B_BUTTON A1
 #define B_BUTTON_PORT PORTF
+#define B_BUTTON_PORTIN PINF
+#define B_BUTTON_DDR DDRF
 #define B_BUTTON_BIT PORTF6
 
 #define PIN_SPEAKER_1 A2
@@ -192,13 +205,30 @@
 //
 // Reference: https://github.com/Arduboy/Arduboy/issues/108
 
-#define RAND_SEED_IN A4 // Open analog input used for noise by initRandomSeed()
-#define RAND_SEED_IN_PORTF
+#endif
+// --------------------
+
+// ----- Pins common on Arduboy and DevKit -----
+
+// Unconnected analog input used for noise by initRandomSeed()
+#define RAND_SEED_IN A4
+#define RAND_SEED_IN_PORT PORTF
 #define RAND_SEED_IN_BIT PORTF1
 // Value for ADMUX to read the random seed pin: 2.56V reference, ADC1
 #define RAND_SEED_IN_ADMUX (_BV(REFS0) | _BV(REFS1) | _BV(MUX0))
 
-#endif
+// SPI interface
+#define SPI_MISO_PORT PORTB
+#define SPI_MISO_BIT PORTB3
+
+#define SPI_MOSI_PORT PORTB
+#define SPI_MOSI_BIT PORTB2
+
+#define SPI_SCK_PORT PORTB
+#define SPI_SCK_BIT PORTB1
+
+#define SPI_SS_PORT PORTB
+#define SPI_SS_BIT PORTB0
 // --------------------
 
 // OLED hardware (SSD1306)
@@ -222,6 +252,69 @@
 
 #define COLUMN_ADDRESS_END (WIDTH - 1) & 127   // 128 pixels wide
 #define PAGE_ADDRESS_END ((HEIGHT/8)-1) & 7    // 8 pages high
+
+/** \brief
+ * Eliminate the USB stack to free up code space.
+ *
+ * \note
+ * **WARNING:** Removing the USB code will make it impossible for sketch
+ * uploader programs to automatically force a reset into the bootloader!
+ * This means that a user will manually have to invoke a reset in order to
+ * upload a new sketch, after one without USB has be been installed.
+ * Be aware that the timing for the point that a reset must be initiated can
+ * be tricky, which could lead to some frustration on the user's part.
+ *
+ * \details
+ * \parblock
+ * This macro will cause the USB code, normally included in the sketch as part
+ * of the standard Arduino environment, to be eliminated. This will free up a
+ * fair amount of program space, and some RAM space as well, at the expense of
+ * disabling all USB functionality within the sketch (except as power input).
+ *
+ * The macro should be placed before the `setup()` function definition:
+ *
+ * \code{.cpp}
+ * #include <Arduboy2.h>
+ *
+ * Arduboy2 arduboy;
+ *
+ * // (Other variable declarations, etc.)
+ *
+ * // Eliminate the USB stack
+ * ARDUBOY_NO_USB
+ *
+ * void setup() {
+ *   arduboy.begin();
+ *   // any additional setup code
+ * }
+ * \endcode
+ *
+ * As stated in the warning above, without the USB code an uploader program
+ * will be unable to automatically force a reset into the bootloader to upload
+ * a new sketch. The user will have to manually invoke a reset. In addition to
+ * eliminating the USB code, this macro will check if the DOWN button is held
+ * when the sketch first starts and, if so, will call `exitToBootloader()` to
+ * start the bootloader for uploading. This makes it easier for the user than
+ * having to press the reset button.
+ *
+ * However, to make it even more convenient for a user to invoke the bootloader
+ * it is highly recommended that a sketch using this macro include a menu or
+ * prompt that allows the user to press the DOWN button within the sketch,
+ * which should cause `exitToBootloader()` to be called.
+ *
+ * At a minimum, the documentation for the sketch should clearly state that a
+ * manual reset will be required, and give detailed instructions on what the
+ * user must do to upload a new sketch.
+ * \endparblock
+ *
+ * \see Arduboy2Core::exitToBootloader()
+ */
+#define ARDUBOY_NO_USB int main() __attribute__ ((OS_main)); \
+int main() { \
+  Arduboy2Core::mainNoUSB(); \
+  return 0; \
+}
+
 
 /** \brief
  * Lower level functions generally dealing directly with the hardware.
@@ -580,9 +673,44 @@ class Arduboy2Core
      * LEDs will light.
      * \endparblock
      *
-     * \see digitalWriteRGB()
+     * \see setRGBled(uint8_t, uint8_t) digitalWriteRGB() freeRGBled()
      */
     void static setRGBled(uint8_t red, uint8_t green, uint8_t blue);
+
+    /** \brief
+     * Set the brightness of one of the RGB LEDs without affecting the others.
+     *
+     * \param color The name of the LED to set. The value given should be one
+     * of RED_LED, GREEN_LED or BLUE_LED.
+     *
+     * \param val The brightness value for the LED, from 0 to 255.
+     *
+     * \note
+     * In order to use this function, the 3 parameter version must first be
+     * called at least once, in order to initialize the hardware.
+     *
+     * \details
+     * This 2 parameter version of the function will set the brightness of a
+     * single LED within the RGB LED without affecting the current brightness
+     * of the other two. See the description of the 3 parameter version of this
+     * function for more details on the RGB LED.
+     *
+     * \see setRGBled(uint8_t, uint8_t, uint8_t) digitalWriteRGB() freeRGBled()
+     */
+    void static setRGBled(uint8_t color, uint8_t val);
+
+
+    /** \brief
+     * Relinquish analog control of the RGB LED.
+     *
+     * \details
+     * Using the RGB LED in analog mode prevents further use of the LED in
+     * digital mode. This function will restore the pins used for the LED, so
+     * it can be used in digital mode.
+     *
+     * \see digitalWriteRGB() setRGBled()
+     */
+    void static freeRGBled();
 
     /** \brief
      * Set the RGB LEDs digitally, to either fully on or fully off.
@@ -609,14 +737,23 @@ class Arduboy2Core
      *     RGB_ON     RGB_ON     RGB_ON     White
      *
      * \note
+     * \parblock
+     * Using the RGB LED in analog mode will prevent digital control of the
+     * LED. To restore the ability to control the LED digitally, use the
+     * `freeRGBled()` function.
+     * \endparblock
+     *
+     * \note
+     * \parblock
      * Many of the Kickstarter Arduboys were accidentally shipped with the
      * RGB LED installed incorrectly. For these units, the green LED cannot be
      * lit. As long as the green led is set to off, turning on the red LED will
      * actually light the blue LED and turning on the blue LED will actually
      * light the red LED. If the green LED is turned on, none of the LEDs
      * will light.
+     * \endparblock
      *
-     * \see digitalWriteRGB(uint8_t, uint8_t) setRGBled()
+     * \see digitalWriteRGB(uint8_t, uint8_t) setRGBled() freeRGBled()
      */
     void static digitalWriteRGB(uint8_t red, uint8_t green, uint8_t blue);
 
@@ -634,7 +771,7 @@ class Arduboy2Core
      * the RGB LED either fully on or fully off. See the description of the
      * 3 parameter version of this function for more details on the RGB LED.
      *
-     * \see digitalWriteRGB(uint8_t, uint8_t, uint8_t) setRGBled()
+     * \see digitalWriteRGB(uint8_t, uint8_t, uint8_t) setRGBled() freeRGBled()
      */
     void static digitalWriteRGB(uint8_t color, uint8_t val);
 
@@ -688,6 +825,29 @@ class Arduboy2Core
      * of Arduino `delay()` will save a few bytes of code.
      */
     void static delayShort(uint16_t ms) __attribute__ ((noinline));
+
+    /** \brief
+     * Exit the sketch and start the bootloader
+     *
+     * \details
+     * The sketch will exit and the bootloader will be started in command mode.
+     * The effect will be similar to pressing the reset button.
+     *
+     * This function is intended to be used to allow uploading a new sketch,
+     * when the USB code has been removed to gain more code space.
+     * Ideally, the sketch would present a "New Sketch Upload" menu or prompt
+     * telling the user to "Press and hold the DOWN button when the procedure
+     * to upload a new sketch has been initiated". The sketch would then wait
+     * for the DOWN button to be pressed and then call this function.
+     *
+     * \see ARDUBOY_NO_USB
+     */
+    void static exitToBootloader();
+
+    // Replacement main() that eliminates the USB stack code.
+    // Used by the ARDUBOY_NO_USB macro. This should not be called
+    // directly from a sketch.
+    void static mainNoUSB();
 
   protected:
     // internals

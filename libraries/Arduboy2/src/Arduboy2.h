@@ -10,7 +10,9 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "Arduboy2Core.h"
+#include "Arduboy2Beep.h"
 #include "Sprites.h"
+#include "SpritesB.h"
 #include <Print.h>
 #include <limits.h>
 
@@ -25,14 +27,14 @@
  * A user program can test this value to conditionally compile based on the
  * library version. For example:
  *
- * \code
+ * \code{.cpp}
  * // If the library is version 2.1.0 or higher
  * #if ARDUBOY_LIB_VER >= 20100
  *   // ... code that make use of a new feature added to V2.1.0
  * #endif
  * \endcode
  */
-#define ARDUBOY_LIB_VER 40100
+#define ARDUBOY_LIB_VER 50000
 
 // EEPROM settings
 #define ARDUBOY_UNIT_NAME_LEN 6 /**< The maximum length of the unit name string. */
@@ -46,8 +48,10 @@
                             // with 0x00
 
 // EEPROM_SYS_FLAGS values
-#define SYS_FLAG_UNAME 0    // Display the unit name on the logo screen
+#define SYS_FLAG_UNAME 0      // Display the unit name on the logo screen
 #define SYS_FLAG_UNAME_MASK _BV(SYS_FLAG_UNAME)
+#define SYS_FLAG_SHOW_LOGO 1  // Show the logo sequence during boot up
+#define SYS_FLAG_SHOW_LOGO_MASK _BV(SYS_FLAG_SHOW_LOGO)
 
 /** \brief
  * Start of EEPROM storage space for sketches.
@@ -135,7 +139,7 @@ struct Point
  *
  * Example:
  *
- * \code
+ * \code{.cpp}
  * #include <Arduboy2.h>
  *
  * Arduboy2 arduboy;
@@ -249,17 +253,11 @@ class Arduboy2Base : public Arduboy2Core
    * The Arduboy logo scrolls down from the top of the screen to the center
    * while the RGB LEDs light in sequence.
    *
-   * If the RIGHT button is pressed while the logo is scrolling down,
-   * the boot logo sequence will be aborted. This can be useful for
-   * developers who wish to quickly start testing, or anyone else who is
-   * impatient and wants to go straight to the actual sketch.
+   * The `bootLogoShell()` helper function is used to perform the actual
+   * sequence. The documentation for `bootLogoShell()` provides details on how
+   * it operates.
    *
-   * This function calls `bootLogoExtra()` after the logo stops scrolling down,
-   * which derived classes can implement to add additional information to the
-   * logo screen. The `Arduboy2` class uses this to display the unit name.
-   *
-   * \see begin() boot() Arduboy2::bootLogoExtra() bootLogoShell()
-   * Arduboy2::bootLogoText()
+   * \see begin() boot() bootLogoShell() Arduboy2::bootLogoText()
    */
   void bootLogo();
 
@@ -276,8 +274,7 @@ class Arduboy2Base : public Arduboy2Core
   void bootLogoCompressed();
 
   /** \brief
-   * Display the boot logo sequence using the `Sprites` class
-   * `drawSelfMasked()` function.
+   * Display the boot logo sequence using `Sprites::drawSelfMasked()`.
    *
    * \details
    * This function can be called by a sketch after `boot()` as an alternative to
@@ -289,8 +286,7 @@ class Arduboy2Base : public Arduboy2Core
   void bootLogoSpritesSelfMasked();
 
   /** \brief
-   * Display the boot logo sequence using the `Sprites` class
-   * `drawOverwrite()` function.
+   * Display the boot logo sequence using `Sprites::drawOverwrite()`.
    *
    * \details
    * This function can be called by a sketch after `boot()` as an alternative to
@@ -300,6 +296,30 @@ class Arduboy2Base : public Arduboy2Core
    * \see bootLogo() begin() boot() Sprites
    */
   void bootLogoSpritesOverwrite();
+
+  /** \brief
+   * Display the boot logo sequence using `SpritesB::drawSelfMasked()`.
+   *
+   * \details
+   * This function can be called by a sketch after `boot()` as an alternative to
+   * `bootLogo()`. This may reduce code size if the sketch itself uses
+   * `SpritesB` class functions.
+   *
+   * \see bootLogo() begin() boot() SpritesB
+   */
+  void bootLogoSpritesBSelfMasked();
+
+  /** \brief
+   * Display the boot logo sequence using `SpritesB::drawOverwrite()`.
+   *
+   * \details
+   * This function can be called by a sketch after `boot()` as an alternative to
+   * `bootLogo()`. This may reduce code size if the sketch itself uses
+   * `SpritesB` class functions.
+   *
+   * \see bootLogo() begin() boot() SpritesB
+   */
+  void bootLogoSpritesBOverwrite();
 
   /** \brief
    * Display the boot logo sequence using the provided function
@@ -313,9 +333,21 @@ class Arduboy2Base : public Arduboy2Core
    * with a reference to a function which will do the actual drawing of the
    * logo.
    *
+   * This function calls `bootLogoExtra()` after the logo stops scrolling down,
+   * which derived classes can implement to add additional information to the
+   * logo screen. The `Arduboy2` class uses this to display the unit name.
+   *
+   * If the RIGHT button is pressed while the logo is scrolling down,
+   * the boot logo sequence will be aborted. This can be useful for
+   * developers who wish to quickly start testing, or anyone else who is
+   * impatient and wants to go straight to the actual sketch.
+   *
+   * If the SYS_FLAG_SHOW_LOGO flag in system EEPROM is cleared, this function
+   * will return without executing the logo display sequence.
+   *
    * The prototype for the function provided to draw the logo is:
-
-   * \code
+   *
+   * \code{.cpp}
    * void drawLogo(int16_t y);
    * \endcode
    *
@@ -325,13 +357,32 @@ class Arduboy2Base : public Arduboy2Core
    * sequence. If the logo height is not 16 pixels, the Y value can be adjusted
    * to compensate.
    *
-   * \see bootLogo() boot()
+   * \see bootLogo() boot() Arduboy2::bootLogoExtra()
    */
   void bootLogoShell(void (*drawLogo)(int16_t));
 
   // Called by bootLogoShell() to allow derived classes to display additional
   // information after the logo stops scrolling down.
   virtual void bootLogoExtra();
+
+  /** \brief
+   * Wait until all buttons have been released.
+   *
+   * \details
+   * This function is called by `begin()` and can be called by a sketch
+   * after `boot()`.
+   *
+   * It won't return unless no buttons are being pressed. A short delay is
+   * performed each time before testing the state of the buttons to do a
+   * simple button debounce.
+   *
+   * This function is called at the end of `begin()` to make sure no buttons
+   * used to perform system start up actions are still being pressed, to
+   * prevent them from erroneously being detected by the sketch code itself.
+   *
+   * \see begin() boot()
+   */
+  void waitNoButtons();
 
   /** \brief
    * Clear the display buffer.
@@ -641,8 +692,8 @@ class Arduboy2Base : public Arduboy2Core
    *
    * \details
    * The Arduino random number generator is seeded with a random value
-   * derrived from entropy from the temperature, voltage reading, and
-   * microseconds since boot.
+   * derived from entropy from an ADC reading of a floating pin combined with
+   * the microseconds since boot.
    *
    * This method is still most effective when called after a semi-random time,
    * such as after a user hits a button to start a game or other semi-random
@@ -660,16 +711,46 @@ class Arduboy2Base : public Arduboy2Core
    *
    * \details
    * Set the frame rate, in frames per second, used by `nextFrame()` to update
-   * frames at a given rate. If this function isn't used, the default rate will
-   * be 60.
+   * frames at a given rate. If this function or `setFrameDuration()`
+   * isn't used, the default rate will be 60 (actually 62.5, see note below).
    *
    * Normally, the frame rate would be set to the desired value once, at the
    * start of the game, but it can be changed at any time to alter the frame
    * update rate.
    *
-   * \see nextFrame()
+   * \note
+   * \parblock
+   * The given rate is internally converted to a frame duration in milliseconds,
+   * rounded down to the nearest integer. Therefore, the actual rate will be
+   * equal to or higher than the rate given.
+
+   * For example, 60 FPS would be 16.67ms per frame. This will be rounded down
+   * to 16ms, giving an actual frame rate of 62.5 FPS.
+   * \endparblock
+   *
+   * \see nextFrame() setFrameDuration()
    */
   void setFrameRate(uint8_t rate);
+
+  /** \brief
+   * Set the frame rate, used by the frame control functions, by giving
+   * the duration of each frame.
+   *
+   * \param duration The desired duration of each frame in milliseconds.
+   *
+   * \details
+   * Set the frame rate by specifying the duration of each frame in
+   * milliseconds. This is used by `nextFrame()` to update frames at a
+   * given rate. If this function or `setFrameRate()` isn't used,
+   * the default will be 16ms per frame.
+   *
+   * Normally, the frame rate would be set to the desired value once, at the
+   * start of the game, but it can be changed at any time to alter the frame
+   * update rate.
+   *
+   * \see nextFrame() setFrameRate()
+   */
+  void setFrameDuration(uint8_t duration);
 
   /** \brief
    * Indicate that it's time to render the next frame.
@@ -685,7 +766,7 @@ class Arduboy2Base : public Arduboy2Core
    * displaying the next frame.
    *
    * example:
-   * \code
+   * \code{.cpp}
    * void loop() {
    *   if (!arduboy.nextFrame()) {
    *     return; // go back to the start of the loop
@@ -694,7 +775,7 @@ class Arduboy2Base : public Arduboy2Core
    * }
    * \endcode
    *
-   * \see setFrameRate() nextFrameDEV()
+   * \see setFrameRate() setFrameDuration() nextFrameDEV()
    */
   bool nextFrame();
 
@@ -740,8 +821,8 @@ class Arduboy2Base : public Arduboy2Core
    * For example, if you wanted to fire a shot every 5 frames while the A button
    * is being held down:
    *
-   * \code
-   * if (arduboy.everyXframes(5)) {
+   * \code{.cpp}
+   * if (arduboy.everyXFrames(5)) {
    *   if arduboy.pressed(A_BUTTON) {
    *     fireShot();
    *   }
@@ -829,7 +910,7 @@ class Arduboy2Base : public Arduboy2Core
    * The `justPressed()` and `justReleased()` functions rely on this function.
    *
    * example:
-   * \code
+   * \code{.cpp}
    * void loop() {
    *   if (!arduboy.nextFrame()) {
    *     return;
@@ -983,7 +1064,7 @@ class Arduboy2Base : public Arduboy2Core
    * Sketches can use the defined value `ARDUBOY_UNIT_NAME_LEN` instead of
    * hard coding a 6 when working with the unit name. For example, to allocate
    * a buffer and read the unit name into it:
-   * \code
+   * \code{.cpp}
    * // Buffer for maximum name length plus the terminator
    * char unitName[ARDUBOY_UNIT_NAME_LEN + 1];
    *
@@ -1022,6 +1103,38 @@ class Arduboy2Base : public Arduboy2Core
    * \see readUnitName() writeUnitID() Arduboy2::bootLogoExtra()
    */
   void writeUnitName(char* name);
+
+  /** \brief
+   * Read the "Show Boot Logo" flag in system EEPROM.
+   *
+   * \return `true` if the flag is set to indicate that the boot logo sequence
+   * should be displayed. `false` if the flag is set to not display the
+   * boot logo sequence.
+   *
+   * \details
+   * The "Show Boot Logo" flag is used to determine whether the system
+   * boot logo sequence is to be displayed when the system boots up.
+   * This function returns the value of this flag.
+   *
+   * \see writeShowBootLogoFlag() bootLogo()
+   */
+  bool readShowBootLogoFlag();
+
+  /** \brief
+   * Write the "Show Boot Logo" flag in system EEPROM.
+   *
+   * \param val If `true` the flag is set to indicate that the boot logo
+   * sequence should be displayed. If `false` the flag is set to not display
+   * the boot logo sequence.
+   *
+   * \details
+   * The "Show Boot Logo" flag is used to determine whether the system
+   * boot logo sequence is to be displayed when the system boots up.
+   * This function allows the flag to be saved with the desired value.
+   *
+   * \see readShowBootLogoFlag() bootLogo()
+   */
+  void writeShowBootLogoFlag(bool val);
 
   /** \brief
    * Read the "Show Unit Name" flag in system EEPROM.
@@ -1067,7 +1180,7 @@ class Arduboy2Base : public Arduboy2Core
    * way that using `everyXFrames()` might.
    *
    * example:
-   * \code
+   * \code{.cpp}
    * // move for 10 frames when right button is pressed, if not already moving
    * if (!moving) {
    *   if (arduboy.justPressed(RIGHT_BUTTON)) {
@@ -1113,6 +1226,8 @@ class Arduboy2Base : public Arduboy2Core
   static void drawLogoCompressed(int16_t y);
   static void drawLogoSpritesSelfMasked(int16_t y);
   static void drawLogoSpritesOverwrite(int16_t y);
+  static void drawLogoSpritesBSelfMasked(int16_t y);
+  static void drawLogoSpritesBOverwrite(int16_t y);
 
   // For button handling
   uint8_t currentButtonState;
@@ -1120,8 +1235,7 @@ class Arduboy2Base : public Arduboy2Core
 
   // For frame funcions
   uint8_t eachFrameMillis;
-  unsigned long lastFrameStart;
-  unsigned long nextFrameStart;
+  uint8_t thisFrameStart;
   bool justRendered;
   uint8_t lastFrameDurationMs;
 };
@@ -1172,7 +1286,7 @@ class Arduboy2 : public Print, public Arduboy2Base
    * https://www.arduino.cc/en/Serial/Print
    *
    * Example:
-   * \code
+   * \code{.cpp}
    * int value = 42;
    *
    * arduboy.println("Hello World"); // Prints "Hello World" and then moves the
@@ -1201,6 +1315,14 @@ class Arduboy2 : public Print, public Arduboy2Base
    * to display text. However, the logo will not look as good when printed as
    * text as it does with the bitmap used by `bootLogo()`.
    *
+   * If the RIGHT button is pressed while the logo is scrolling down,
+   * the boot logo sequence will be aborted. This can be useful for
+   * developers who wish to quickly start testing, or anyone else who is
+   * impatient and wants to go straight to the actual sketch.
+   *
+   * If the SYS_FLAG_SHOW_LOGO flag in system EEPROM is cleared, this function
+   * will return without executing the logo display sequence.
+   *
    * \see bootLogo() boot() Arduboy2::bootLogoExtra()
    */
   void bootLogoText();
@@ -1215,7 +1337,8 @@ class Arduboy2 : public Print, public Arduboy2Base
    * the bottom of the screen. This function pauses for a short time to allow
    * the name to be seen.
    *
-   * The name is not displayed if the "Show Unit Name" flag is not set.
+   * If the SYS_FLAG_UNAME flag in system EEPROM is cleared, this function
+   * will return without showing the unit name or pausing.
    *
    * \note
    * This function would not normally be called directly from within a sketch
